@@ -60,6 +60,7 @@ case_getObjectKey = do
 case_getObjectValue = do
     let Right r = parse "{\"foo\":\"bar\"}"
     let Just o = asObject $ root r
+    assertEqual "" 1 (numKeys o)
     let k = getObjectKey o 0
     let v = asString $ getObjectValue o 0
     assertEqual "" "foo" k

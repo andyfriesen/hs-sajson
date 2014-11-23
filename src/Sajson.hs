@@ -79,30 +79,11 @@ intFromType ty = case ty of
     TObject  -> 7
 -}
 
-newtype Str = Str (Ptr CChar, Word)
-
 ptrSize :: Int
 ptrSize = sizeOf (undefined :: Ptr CChar)
 
 wordSize :: Int
 wordSize = sizeOf (undefined :: Word)
-
-instance Storable Str where
-    sizeOf _ = ptrSize + wordSize
-    alignment (Str (a, _)) = alignment a
-    peek ptr = do
-        print "peek"
-        p <- peek $ castPtr ptr
-        print ("p", p)
-        l <- peek $ castPtr $ ptr `plusPtr` 1
-        print ("l", l)
-        return $ Str (p, l)
-
-    poke ptr (Str (p, l)) = do
-        print p
-        poke (castPtr ptr) p
-        print l
-        poke (castPtr $ ptr `plusPtr` 1) l
 
 foreign import ccall unsafe "sj_parser"                     sj_parser                       :: Word -> (Ptr CChar) -> IO (Ptr CppParser)
 foreign import ccall unsafe "&sj_parser_free"               sj_parser_free                  :: FunPtr (Ptr CppParser -> IO ())
