@@ -100,4 +100,14 @@ void sj_value_get_string_value(value* v, const char** result, size_t* resultLeng
     *resultLength = s.length();
 }
 
+value* sj_value_get_object_with_key(value* v, const char* key, size_t keyLength) {
+    string k(key, keyLength);
+    size_t index = v->find_object_key(k);
+    if (index < v->get_length()) {
+        return new value(v->get_object_value(index));
+    } else {
+        return nullptr;
+    }
+}
+
 }

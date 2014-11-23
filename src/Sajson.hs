@@ -12,12 +12,15 @@ module Sajson
     , asArray
     , asObject
     , asInt
+    , asDouble
     , asString
     , getArrayElement
     , Sajson.length
     , numKeys
     , getObjectKey
     , getObjectValue
+    , indexOfObjectKey
+    , getObjectWithKey
     ) where
 
 import Prelude hiding (True, False, length)
@@ -28,7 +31,7 @@ import Foreign.ForeignPtr
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.C.Types (CChar)
 import Foreign.Storable
-import Data.Text (Text, pack)
+import Data.Text (Text)
 import Data.Text.Foreign
 import Data.Word
 import Data.Text.Encoding
@@ -79,12 +82,6 @@ intFromType ty = case ty of
     TObject  -> 7
 -}
 
-ptrSize :: Int
-ptrSize = sizeOf (undefined :: Ptr CChar)
-
-wordSize :: Int
-wordSize = sizeOf (undefined :: Word)
-
 foreign import ccall unsafe "sj_parser"                     sj_parser                       :: Word -> (Ptr CChar) -> IO (Ptr CppParser)
 foreign import ccall unsafe "&sj_parser_free"               sj_parser_free                  :: FunPtr (Ptr CppParser -> IO ())
 foreign import ccall unsafe "sj_parser_get_document"        sj_parser_get_document          :: Ptr CppParser -> IO (Ptr CppDocument)
@@ -99,9 +96,12 @@ foreign import ccall unsafe "sj_value_get_type"             sj_value_get_type   
 foreign import ccall unsafe "sj_value_get_length"           sj_value_get_length             :: Ptr CppValue -> IO Word
 foreign import ccall unsafe "sj_value_get_array_element"    sj_value_get_array_element      :: Ptr CppValue -> Word -> IO (Ptr CppValue)
 foreign import ccall unsafe "sj_value_get_integer_value"    sj_value_get_integer_value      :: Ptr CppValue -> IO Int
+foreign import ccall unsafe "sj_value_get_double_value"     sj_value_get_double_value       :: Ptr CppValue -> IO Double
 foreign import ccall unsafe "sj_value_get_string_value"     sj_value_get_string_value       :: Ptr CppValue -> Ptr (Ptr CChar) -> Ptr Word -> IO ()
 foreign import ccall unsafe "sj_value_get_object_key"       sj_value_get_object_key         :: Ptr CppValue -> Word -> Ptr (Ptr CChar) -> Ptr Word -> IO ()
 foreign import ccall unsafe "sj_value_get_object_value"     sj_value_get_object_value       :: Ptr CppValue -> Word -> IO (Ptr CppValue)
+foreign import ccall unsafe "sj_value_find_object_key"      sj_value_find_object_key        :: Ptr CppValue -> Ptr CChar -> Word -> IO Word
+foreign import ccall unsafe "sj_value_get_object_with_key"  sj_value_get_object_with_key    :: Ptr CppValue -> Ptr CChar -> Word -> IO (Ptr CppValue)
 
 parse :: Text -> Either ParseError Document
 parse t = unsafePerformIO $ do
@@ -124,6 +124,7 @@ parse t = unsafePerformIO $ do
                 errMsg <- unsafePackCString errPtr
                 return $ Left $ ParseError lineNo colNo (decodeUtf8 errMsg)
 
+mkValue :: ForeignPtr CppParser -> Ptr CppValue -> IO Value
 mkValue pp vp = do
     fp <- newForeignPtr sj_value_free vp
     return $ Value pp fp
@@ -134,6 +135,7 @@ root (Document parserPtr docPtr) = unsafePerformIO $ do
         vp <- sj_document_get_root dp
         mkValue parserPtr vp
 
+withValPtr :: Value -> (Ptr CppValue -> IO a) -> IO a
 withValPtr (Value _ valPtr) f =
     withForeignPtr valPtr f
 
@@ -162,6 +164,14 @@ asInt val =
         _ ->
             Nothing
 
+asDouble :: Value -> Maybe Double
+asDouble val =
+    case typeOf val of
+        TDouble -> unsafePerformIO $
+            fmap Just $ withValPtr val sj_value_get_double_value
+        _ ->
+            Nothing
+
 asString :: Value -> Maybe Text
 asString val =
     case typeOf val of
@@ -181,6 +191,7 @@ getArrayElement (Array (Value parserPtr valPtr)) index = unsafePerformIO $
         result <- sj_value_get_array_element vp index
         mkValue parserPtr result
 
+unsafeLength :: Value -> Word
 unsafeLength val = unsafePerformIO $
     withValPtr val $ \vp ->
         sj_value_get_length vp
@@ -211,3 +222,29 @@ getObjectValue (Object (Value parserPtr valPtr)) index = unsafePerformIO $
     withForeignPtr valPtr $ \vp -> do
         result <- sj_value_get_object_value vp index
         mkValue parserPtr result
+
+indexOfObjectKey :: Object -> Text -> Maybe Word
+indexOfObjectKey (Object (Value _ valPtr)) key = unsafePerformIO $
+    withForeignPtr valPtr $ \vp -> do
+        withCStringLen key $ \(cp, l) -> do
+            result <- sj_value_find_object_key vp cp $ fromIntegral l
+            nk <- sj_value_get_length vp
+            return $ if result < nk then Just result else Nothing
+
+getObjectWithKey :: Object -> Text -> Maybe Value
+getObjectWithKey (Object (Value parserPtr valPtr)) key = unsafePerformIO $
+    withForeignPtr valPtr $ \vp -> do
+        withCStringLen key $ \(cp, l) -> do
+            result <- sj_value_get_object_with_key vp cp (fromIntegral l)
+            if nullPtr /= result
+                then fmap Just $ mkValue parserPtr result
+                else return Nothing
+
+instance Show Value where
+    show v = case typeOf v of
+        TNull -> "null"
+        TTrue -> "true"
+        TFalse -> "false"
+        TInteger -> show i where Just i = asInt v
+        TDouble -> show d  where Just d = asDouble v
+        _ -> "???"
