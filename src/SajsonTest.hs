@@ -53,20 +53,17 @@ case_get_element = do
 
 case_getObjectKey = do
     let Right r = parse "{\"foo\":\"bar\"}"
-    assertEqual "" TObject $ typeOf $ root r
     let Just o = asObject $ root r
     let k = getObjectKey o 0
-    assertEqual "" "bar" k
-    return ()
+    assertEqual "" "foo" k
 
--- case_walk = do
---     let Right r = parse "{\"foo\":\"bar\",\"baz\":999}"
---     let Just o = asObject $ root r
---     let [(k1, v1), (k2, v2)] = [(getObjectKey o i, getObjectValue o i) | i <- [0..1]]
---     let s1 = asString v1
---     let i2 = asInt v2
---     assertEqual "" ("foo", Just "bar") (k1, s1)
---     assertEqual "" ("baz", Just 999) (k2, i2)
+case_getObjectValue = do
+    let Right r = parse "{\"foo\":\"bar\"}"
+    let Just o = asObject $ root r
+    let k = getObjectKey o 0
+    let v = asString $ getObjectValue o 0
+    assertEqual "" "foo" k
+    assertEqual "" (Just "bar") v
 
 tests :: TestTree
 tests = $(testGroupGenerator)

@@ -64,11 +64,10 @@ value* sj_value_get_array_element(value* v, size_t index) {
     return new value(v->get_array_element(index));
 }
 
-void sj_value_get_object_key(value* v, size_t index, str* result) {
-    printf("get object key\n");
+void sj_value_get_object_key(value* v, size_t index, const char** result, size_t* resultLength) {
     string s = v->get_object_key(index);
-    result->data = s.data();
-    result->length = s.length();
+    *result = s.data();
+    *resultLength = s.length();
 }
 
 value* sj_value_get_object_value(value* v, size_t index) {
@@ -95,10 +94,10 @@ size_t sj_value_get_string_length(value* v) {
     return v->get_string_length();
 }
 
-void sj_value_get_string_value(value* v, str* result) {
+void sj_value_get_string_value(value* v, const char** result, size_t* resultLength) {
     string s = v->as_str();
-    result->data = s.data();
-    result->length = s.length();
+    *result = s.data();
+    *resultLength = s.length();
 }
 
 }

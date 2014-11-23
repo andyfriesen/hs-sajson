@@ -21,6 +21,7 @@ module Sajson
     ) where
 
 import Prelude hiding (True, False, length)
+import Control.DeepSeq (force)
 import System.IO.Unsafe (unsafePerformIO)
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -117,8 +118,8 @@ foreign import ccall unsafe "sj_value_get_type"             sj_value_get_type   
 foreign import ccall unsafe "sj_value_get_length"           sj_value_get_length             :: Ptr CppValue -> IO Word
 foreign import ccall unsafe "sj_value_get_array_element"    sj_value_get_array_element      :: Ptr CppValue -> Word -> IO (Ptr CppValue)
 foreign import ccall unsafe "sj_value_get_integer_value"    sj_value_get_integer_value      :: Ptr CppValue -> IO Int
-foreign import ccall unsafe "sj_value_get_string_value"     sj_value_get_string_value       :: Ptr CppValue -> Ptr Str -> IO ()
-foreign import ccall unsafe "sj_value_get_object_key"       sj_value_get_object_key         :: Ptr CppValue -> Word -> Ptr Str -> IO ()
+foreign import ccall unsafe "sj_value_get_string_value"     sj_value_get_string_value       :: Ptr CppValue -> Ptr (Ptr CChar) -> Ptr Word -> IO ()
+foreign import ccall unsafe "sj_value_get_object_key"       sj_value_get_object_key         :: Ptr CppValue -> Word -> Ptr (Ptr CChar) -> Ptr Word -> IO ()
 foreign import ccall unsafe "sj_value_get_object_value"     sj_value_get_object_value       :: Ptr CppValue -> Word -> IO (Ptr CppValue)
 
 parse :: Text -> Either ParseError Document
@@ -184,9 +185,13 @@ asString :: Value -> Maybe Text
 asString val =
     case typeOf val of
         TString -> unsafePerformIO $ do
-            alloca $ \sp -> do
-                withValPtr val $ \vp -> sj_value_get_string_value vp sp
-                fmap Just $ mkText sp
+            alloca $ \cpp ->
+                alloca $ \lp -> do
+                    withValPtr val $ \vp -> sj_value_get_string_value vp cpp lp
+                    cp <- peek cpp
+                    l <- peek lp
+                    bs <- unsafePackCStringLen (cp, fromIntegral l)
+                    return $ Just $ force $ decodeUtf8 bs
         _ -> Nothing
 
 getArrayElement :: Array -> Word -> Value
@@ -205,21 +210,20 @@ length (Array v) = unsafeLength v
 numKeys :: Object -> Word
 numKeys (Object o) = unsafeLength o
 
-mkText :: Ptr Str -> IO Text
-mkText sp = do
-    -- Str (p, l) <- peek sp
-    -- bs <- unsafePackCStringLen (p, fromIntegral l)
-    return $ pack "ho"
-    -- return $ decodeUtf8 bs
+mkText :: Ptr (Ptr CChar) -> Ptr Word -> IO Text
+mkText ccp lp = do
+    cp <- peek ccp
+    l <- peek lp
+    bs <- unsafePackCStringLen (cp, fromIntegral l)
+    return $ force $ decodeUtf8 bs
 
 getObjectKey :: Object -> Word -> Text
 getObjectKey (Object o) index = unsafePerformIO $
     withValPtr o $ \op ->
-        alloca $ \sp -> do
-            let _ = sp :: Ptr Str
-            -- sj_value_get_object_key op index sp
-            -- mkText sp
-            return $ pack "hoya"
+        alloca $ \ccp ->
+            alloca $ \lp -> do
+                sj_value_get_object_key op index ccp lp
+                mkText ccp lp
 
 getObjectValue :: Object -> Word -> Value
 getObjectValue (Object (Value parserPtr valPtr)) index = unsafePerformIO $
