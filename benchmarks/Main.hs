@@ -19,5 +19,5 @@ main = do
     defaultMain [ bgroup "sajson"
                     [ bench "parse" $ whnf Sajson.parse contentText ]
                 , bgroup "aeson"
-                    [ bench "parse" $ whnf (Aeson.decode :: BSL.ByteString -> Maybe Aeson.Value) lazyContent ]
+                    [ bench "parse" $ nf (Aeson.decode :: BSL.ByteString -> Maybe Aeson.Value) lazyContent ]
                 ]
