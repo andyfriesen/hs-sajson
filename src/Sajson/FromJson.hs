@@ -3,10 +3,16 @@ module Sajson.FromJson where
 import Sajson hiding (ParseError)
 import Data.Text (Text)
 
-type ParseError = String
+type DecodeError = String
 
 class FromJson a where
-    fromJson :: Value -> Either ParseError a
+    fromJson :: Value -> Either DecodeError a
+
+instance FromJson Bool where
+    fromJson v = case typeOf v of
+        TFalse -> Right False
+        TTrue -> Right True
+        _ -> Left $ "Expected bool got " ++ (show v)
 
 instance FromJson Int where
     fromJson v = case asInt v of
@@ -35,17 +41,17 @@ instance FromJson a => FromJson (Maybe a) where
         | TNull == typeOf v = Right Nothing
         | otherwise = fmap Just $ fromJson v
 
-withObject :: Value -> (Object -> Either ParseError a) -> Either ParseError a
+withObject :: Value -> (Object -> Either DecodeError a) -> Either DecodeError a
 withObject v f = case asObject v of
     Just o -> f o
     Nothing -> Left $ "Expected object, got " ++ (show v)
 
-getKey :: FromJson a => Object -> Text -> Either ParseError a
+getKey :: FromJson a => Object -> Text -> Either DecodeError a
 getKey a key = case getObjectWithKey a key of
     Just o -> fromJson o
     Nothing -> Left $ "Key " ++ (show key) ++ " not found"
 
-getOptionalKey :: FromJson a => Object -> Text -> Either ParseError (Maybe a)
+getOptionalKey :: FromJson a => Object -> Text -> Either DecodeError (Maybe a)
 getOptionalKey a key = case getObjectWithKey a key of
     Nothing -> Right Nothing
     Just o -> fmap Just $ fromJson o
