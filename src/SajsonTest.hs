@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell, OverloadedStrings, RecordWildCards #-}
 
 module Main (main) where
 
@@ -10,6 +10,9 @@ import Test.Tasty.TH as Tasty
 import Test.HUnit as HUnit hiding (State)
 import Sajson
 import qualified Sajson as Sajson
+
+import Sajson.FromJson (FromJson (..), getKey, withObject)
+import Data.Text (Text)
 
 assumeSuccess (Right r) = r
 assumeSuccess (Left e) = error $ "Unexpected error: " ++ (show e)
@@ -155,6 +158,55 @@ case_getObjectWithKey = do
     let v = getObjectWithKey o "quux"
     assertEqual "" (Just TNull) (fmap typeOf v)
     assertEqual "" Nothing (getObjectWithKey o "does not exist")
+
+data Person = Person
+    { pName :: Text
+    , pAge :: Int
+    , pHobbies :: [Text]
+    , pMotorcycles :: [Motorcycle]
+    } deriving (Show, Eq)
+
+instance FromJson Person where
+    fromJson v = withObject v $ \o -> do
+        pName <- getKey o "name"
+        pAge <- getKey o "age"
+        pHobbies <- getKey o "hobbies"
+        pMotorcycles <- getKey o "motorcycles"
+        return Person {..}
+
+data Motorcycle = Motorcycle
+    { mMake :: Text
+    , mYear :: Int
+    , mLoudness :: Double
+    } deriving (Show, Eq)
+
+instance FromJson Motorcycle where
+    fromJson v = withObject v $ \o -> do
+        mMake <- getKey o "make"
+        mYear <- getKey o "year"
+        mLoudness <- getKey o "loudness"
+        return Motorcycle {..}
+
+case_fromJson = do
+    let Right r = parse "{\"name\":\"andy\",\"age\":9000000,\"hobbies\":[\"haskell\",\"kabuki\"],\"motorcycles\":[{\"make\":\"kawasaki\",\"year\":1980,\"loudness\":9000000}]}"
+    let o = root r
+    let p = fromJson o :: Either String Person
+    let expected = Right Person
+            { pName = "andy"
+            , pAge = 9000000
+            , pHobbies = ["haskell", "kabuki"]
+            , pMotorcycles =
+                [ Motorcycle
+                    { mMake = "kawasaki"
+                    , mYear = 1980
+                    , mLoudness = 9000000
+                    }
+                ]
+            }
+
+    assertEqual "" expected p
+
+    return ()
 
 tests :: TestTree
 tests = $(testGroupGenerator)

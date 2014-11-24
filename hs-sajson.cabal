@@ -17,6 +17,8 @@ cabal-version:       >=1.10
 
 library
     exposed-modules:     Sajson
+                       , Sajson.FromJson
+
     c-sources:           src/hs-sajson.cpp
     include-dirs:        sajson/include
     extra-libraries:     c++
@@ -42,6 +44,7 @@ test-suite tests
     main-is: src/SajsonTest.hs
     build-depends: base
                  , hs-sajson
+                 , text
                  , tasty
                  , tasty-hunit
                  , tasty-quickcheck
