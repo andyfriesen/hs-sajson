@@ -1,13 +1,11 @@
 
 module Sajson
-    ( Document
-    , Value
+    ( Value
     , Array
     , Object
     , ParseError (..)
     , Type (..)
     , parse
-    , root
     , typeOf
     , asArray
     , asObject
@@ -44,8 +42,7 @@ data CppValue
 
 -- I am not sure if this is correct.
 -- The lifetime of documents and values is dependent on the lifetime of the parser, so
--- all Documents and Values retain the ForeignPtr.
-data Document = Document !(ForeignPtr CppParser) !(ForeignPtr CppDocument)
+-- all Values retain the ForeignPtr.
 data Value    = Value !(ForeignPtr CppParser) !(ForeignPtr CppValue)
 
 newtype Array = Array Value
@@ -107,37 +104,34 @@ foreign import ccall unsafe "sj_value_get_object_value"     sj_value_get_object_
 foreign import ccall unsafe "sj_value_find_object_key"      sj_value_find_object_key        :: Ptr CppValue -> Ptr CChar -> Word -> IO Word
 foreign import ccall unsafe "sj_value_get_object_with_key"  sj_value_get_object_with_key    :: Ptr CppValue -> Ptr CChar -> Word -> IO (Ptr CppValue)
 
-parse :: Text -> Either ParseError Document
+parse :: Text -> Either ParseError Value
 parse t = unsafePerformIO $ do
     parserPtr <- withCStringLen t $ \(ptr, len) ->
         sj_parser (fromIntegral len) ptr
     p <- newForeignPtr sj_parser_free $ parserPtr
 
     withForeignPtr p $ \ptr -> do
-        docPtr <- sj_parser_get_document ptr
-        isValid <- sj_document_is_valid docPtr
+        d <- sj_parser_get_document ptr
+        isValid <- sj_document_is_valid d
+        docPtr <- newForeignPtr sj_document_free d
 
-        if isValid
-            then do
-                d <- newForeignPtr sj_document_free docPtr
-                return $ Right $ Document p d
-            else do
-                lineNo <- sj_document_get_error_line docPtr
-                colNo  <- sj_document_get_error_column docPtr
-                errPtr <- sj_document_get_error_message docPtr
-                errMsg <- unsafePackCString errPtr
-                return $ Left $ ParseError lineNo colNo (force $ decodeUtf8 errMsg)
+        withForeignPtr docPtr $ \dp ->
+            if isValid
+                then do
+                    vp <- sj_document_get_root dp
+                    fmap Right $ mkValue p vp
+
+                else do
+                    lineNo <- sj_document_get_error_line dp
+                    colNo  <- sj_document_get_error_column dp
+                    errPtr <- sj_document_get_error_message dp
+                    errMsg <- unsafePackCString errPtr
+                    return $ Left $ ParseError lineNo colNo (force $ decodeUtf8 errMsg)
 
 mkValue :: ForeignPtr CppParser -> Ptr CppValue -> IO Value
 mkValue pp vp = do
     fp <- newForeignPtr sj_value_free vp
     return $ Value pp fp
-
-root :: Document -> Value
-root (Document parserPtr docPtr) = unsafePerformIO $ do
-    withForeignPtr docPtr $ \dp -> do
-        vp <- sj_document_get_root dp
-        mkValue parserPtr vp
 
 withValPtr :: Value -> (Ptr CppValue -> IO a) -> IO a
 withValPtr (Value _ valPtr) f =

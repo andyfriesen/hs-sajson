@@ -19,12 +19,12 @@ assumeSuccess (Left e) = error $ "Unexpected error: " ++ (show e)
 
 parseObject s =
     let Right r = parse s
-        Just o = asObject $ root r
+        Just o = asObject r
     in o
 
 parseArray s =
     let Right r = parse s
-        Just a = asArray $ root r
+        Just a = asArray r
     in a
 
 assertNotEqual a b
@@ -45,8 +45,8 @@ case_parse_success = do
 
 case_get_value_type :: IO ()
 case_get_value_type = do
-    assertEqual "" TObject (typeOf $ root $ assumeSuccess $ parse "{}")
-    assertEqual "" TArray (typeOf $ root $ assumeSuccess $ parse "[]")
+    assertEqual "" TObject (typeOf $ assumeSuccess $ parse "{}")
+    assertEqual "" TArray (typeOf $ assumeSuccess $ parse "[]")
 
 case_get_length :: IO ()
 case_get_length = do
@@ -105,7 +105,7 @@ case_getObjectKey = do
 case_getObjectValue :: IO ()
 case_getObjectValue = do
     let Right r = parse "{\"foo\":\"bar\"}"
-    let Just o = asObject $ root r
+    let Just o = asObject r
     assertEqual "" 1 (numKeys o)
     let k = getObjectKey o 0
     let v = asString $ getObjectValue o 0
@@ -189,7 +189,7 @@ instance FromJson Motorcycle where
 
 case_fromJson = do
     let Right r = parse "{\"name\":\"andy\",\"age\":9000000,\"hobbies\":[\"haskell\",\"kabuki\"],\"motorcycles\":[{\"make\":\"kawasaki\",\"year\":1980,\"loudness\":9000000}]}"
-    let o = root r
+    let o = r
     let p = fromJson o :: Either String Person
     let expected = Right Person
             { pName = "andy"
