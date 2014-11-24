@@ -13,6 +13,7 @@ module Sajson
     , asObject
     , asInt
     , asDouble
+    , asNumber
     , asString
     , getArrayElement
     , Sajson.length
@@ -23,7 +24,7 @@ module Sajson
     , getObjectWithKey
     ) where
 
-import Prelude hiding (True, False, length)
+import Prelude hiding (length)
 import Control.DeepSeq (force)
 import System.IO.Unsafe (unsafePerformIO)
 import Foreign.Ptr
@@ -48,7 +49,9 @@ data Document = Document !(ForeignPtr CppParser) !(ForeignPtr CppDocument)
 data Value    = Value !(ForeignPtr CppParser) !(ForeignPtr CppValue)
 
 newtype Array = Array Value
+    deriving (Eq, Show)
 newtype Object = Object Value
+    deriving (Eq, Show)
 
 data ParseError = ParseError Int Int Text
     deriving (Show, Eq)
@@ -96,6 +99,7 @@ foreign import ccall unsafe "sj_value_get_type"             sj_value_get_type   
 foreign import ccall unsafe "sj_value_get_length"           sj_value_get_length             :: Ptr CppValue -> IO Word
 foreign import ccall unsafe "sj_value_get_array_element"    sj_value_get_array_element      :: Ptr CppValue -> Word -> IO (Ptr CppValue)
 foreign import ccall unsafe "sj_value_get_integer_value"    sj_value_get_integer_value      :: Ptr CppValue -> IO Int
+foreign import ccall unsafe "sj_value_get_number_value"     sj_value_get_number_value       :: Ptr CppValue -> IO Double
 foreign import ccall unsafe "sj_value_get_double_value"     sj_value_get_double_value       :: Ptr CppValue -> IO Double
 foreign import ccall unsafe "sj_value_get_string_value"     sj_value_get_string_value       :: Ptr CppValue -> Ptr (Ptr CChar) -> Ptr Word -> IO ()
 foreign import ccall unsafe "sj_value_get_object_key"       sj_value_get_object_key         :: Ptr CppValue -> Word -> Ptr (Ptr CChar) -> Ptr Word -> IO ()
@@ -122,7 +126,7 @@ parse t = unsafePerformIO $ do
                 colNo  <- sj_document_get_error_column docPtr
                 errPtr <- sj_document_get_error_message docPtr
                 errMsg <- unsafePackCString errPtr
-                return $ Left $ ParseError lineNo colNo (decodeUtf8 errMsg)
+                return $ Left $ ParseError lineNo colNo (force $ decodeUtf8 errMsg)
 
 mkValue :: ForeignPtr CppParser -> Ptr CppValue -> IO Value
 mkValue pp vp = do
@@ -164,6 +168,16 @@ asInt val =
         _ ->
             Nothing
 
+asNumber :: Value -> Maybe Double
+asNumber val =
+    case typeOf val of
+        TDouble -> go
+        TInteger -> go
+        _ -> Nothing
+  where
+    go = unsafePerformIO $
+        fmap Just $ withValPtr val sj_value_get_number_value
+
 asDouble :: Value -> Maybe Double
 asDouble val =
     case typeOf val of
@@ -172,18 +186,21 @@ asDouble val =
         _ ->
             Nothing
 
+unsafeAsString :: Value -> Text
+unsafeAsString val = unsafePerformIO $ do
+    alloca $ \cpp ->
+        alloca $ \lp -> do
+            withValPtr val $ \vp -> sj_value_get_string_value vp cpp lp
+            cp <- peek cpp
+            l <- peek lp
+            bs <- unsafePackCStringLen (cp, fromIntegral l)
+            return $ force $ decodeUtf8 bs
+
 asString :: Value -> Maybe Text
 asString val =
     case typeOf val of
-        TString -> unsafePerformIO $ do
-            alloca $ \cpp ->
-                alloca $ \lp -> do
-                    withValPtr val $ \vp -> sj_value_get_string_value vp cpp lp
-                    cp <- peek cpp
-                    l <- peek lp
-                    bs <- unsafePackCStringLen (cp, fromIntegral l)
-                    return $ Just $ force $ decodeUtf8 bs
-        _ -> Nothing
+        TString -> Just $ unsafeAsString val
+        _       -> Nothing
 
 getArrayElement :: Array -> Word -> Value
 getArrayElement (Array (Value parserPtr valPtr)) index = unsafePerformIO $
@@ -247,4 +264,37 @@ instance Show Value where
         TFalse -> "false"
         TInteger -> show i where Just i = asInt v
         TDouble -> show d  where Just d = asDouble v
-        _ -> "???"
+        TString -> show t  where t = unsafeAsString v
+        TArray -> "{Array length=" ++ (show $ unsafeLength v) ++ "}"
+        TObject -> "{Object length=" ++ (show $ unsafeLength v) ++ "}"
+
+instance Eq Value where
+    -- This could be more efficient by delegating the work to C.
+    a == b
+        | typeOf a /= typeOf b = False
+        | otherwise =
+            case typeOf a of
+                TNull    -> True
+                TTrue    -> True
+                TFalse   -> True
+                TInteger -> asInt a == asInt b
+                TDouble  -> asDouble a == asDouble b
+                TString  -> unsafeAsString a == unsafeAsString b
+                TArray   -> eqArrays (Array a) (Array b)
+                TObject  -> eqObjects (Object a) (Object b)
+
+eqArrays :: Array -> Array -> Bool
+eqArrays a b
+    | length a /= length b = False
+    | otherwise =
+        let cmpElement i = (getArrayElement a i) == (getArrayElement b i)
+        in and (map cmpElement [0..length a - 1])
+
+eqObjects :: Object -> Object -> Bool
+eqObjects a b
+    | numKeys a /= numKeys b = False
+    | otherwise =
+        let cmpElement i =
+                ((getObjectKey a i) == (getObjectKey b i)) &&
+                ((getObjectValue a i) == (getObjectValue b i))
+        in and (map cmpElement [0..numKeys a - 1])

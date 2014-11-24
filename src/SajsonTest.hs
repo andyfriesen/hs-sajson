@@ -24,59 +24,82 @@ parseArray s =
         Just a = asArray $ root r
     in a
 
-assertFalse message True = assertFailure message
-assertFalse _message False = return ()
+assertNotEqual a b
+    | a == b = assertFailure $ "assertNotEqual failed: " ++ show a
+    | otherwise = return ()
 
 case_parse_error :: IO ()
 case_parse_error = do
     let Left r = parse "aoeuaoeu"
     assertEqual "" (ParseError 1 1 "document root must be object or array") r
 
+case_parse_success :: IO ()
 case_parse_success = do
     let r = parse "{}"
     case r of
         Right _ -> return ()
         Left _ -> assertFailure "Parsing should have succeeded"
 
+case_get_value_type :: IO ()
 case_get_value_type = do
     assertEqual "" TObject (typeOf $ root $ assumeSuccess $ parse "{}")
     assertEqual "" TArray (typeOf $ root $ assumeSuccess $ parse "[]")
 
+case_get_length :: IO ()
 case_get_length = do
-    let Right r = parse "[1,2,3,4,5]"
-    let Just a = asArray $ root r
+    let a = parseArray "[1,2,3,4,5]"
     assertEqual "" 5 (Sajson.length a)
 
+case_num_keys :: IO ()
 case_num_keys = do
-    let Right r = parse "{\"hello\":\"world\",\"foo\":999}"
-    let Just o = asObject $ root r
+    let o = parseObject "{\"hello\":\"world\",\"foo\":999}"
     assertEqual "" 2 (Sajson.numKeys o)
 
+case_asString :: IO ()
 case_asString = do
-    let Right r = parse "[\"Hello\"]"
-    let Just a = asArray $ root r
+    let a = parseArray "[\"Hello\"]"
     let s = asString $ getArrayElement a 0
     assertEqual "" (Just "Hello") s
 
+case_get_element :: IO ()
 case_get_element = do
-    let Right r = parse "[1,2,3,4,6]"
-    let Just a = asArray $ root r
+    let a = parseArray "[1,2,3,4,6]"
     let len = Sajson.length a
     let last = getArrayElement a (len - 1)
     assertEqual "" (Just 6) (asInt last)
 
-case_asDouble = do
-    let a = parseArray "[3.14]"
-    let v = getArrayElement a 0
-    let d = asDouble v
-    assertEqual "" (Just 3.14) d
+case_asInt :: IO ()
+case_asInt = do
+    let a = parseArray "[3.14,5]"
+    let v1 = getArrayElement a 0
+    let v2 = getArrayElement a 1
+    let d1 = asInt v1
+    let d2 = asInt v2
+    assertEqual "" (Nothing, Just 5) (d1, d2)
 
+case_asDouble :: IO ()
+case_asDouble = do
+    let a = parseArray "[3.14,5]"
+    let v1 = getArrayElement a 0
+    let v2 = getArrayElement a 1
+    let d1 = asDouble v1
+    let d2 = asDouble v2
+    assertEqual "" (Just 3.14, Nothing) (d1, d2)
+
+case_asNumber :: IO ()
+case_asNumber = do
+    let a = parseArray "[3.14,4]"
+    let e1 = asNumber $ getArrayElement a 0
+    let e2 = asNumber $ getArrayElement a 1
+    assertEqual "" (Just 3.14, Just 4) (e1, e2)
+
+case_getObjectKey :: IO ()
 case_getObjectKey = do
-    let Right r = parse "{\"foo\":\"bar\"}"
-    let Just o = asObject $ root r
+    let o = parseObject "{\"foo\":\"bar\"}"
     let k = getObjectKey o 0
     assertEqual "" "foo" k
 
+case_getObjectValue :: IO ()
 case_getObjectValue = do
     let Right r = parse "{\"foo\":\"bar\"}"
     let Just o = asObject $ root r
@@ -86,6 +109,7 @@ case_getObjectValue = do
     assertEqual "" "foo" k
     assertEqual "" (Just "bar") v
 
+case_indexOfObjectKey :: IO ()
 case_indexOfObjectKey = do
     let o = parseObject "{\"foo\":\"bar\",\"baz\":999,\"quux\":null}"
     let Just index = indexOfObjectKey o "baz"
@@ -95,12 +119,42 @@ case_indexOfObjectKey = do
     assertEqual "" "baz" k
     assertEqual "" (Just 999) vi
 
+case_arrayEquality :: IO ()
+case_arrayEquality = do
+    let a = parseArray "[1,2,3,4,5]"
+    let b = parseArray "[1,2,4,3,5]"
+    let c = parseArray "[9,8,7]"
+    assertEqual "" a a
+    assertEqual "" b b
+    assertEqual "" c c
+    assertNotEqual a b
+    assertNotEqual a c
+    assertNotEqual b c
+    assertNotEqual b a
+    assertNotEqual c a
+    assertNotEqual c b
+
+case_objectEquality :: IO ()
+case_objectEquality = do
+    let a = parseObject "{\"foo\":\"bar\"}"
+    let b = parseObject "{\"count\":9000,\"items\":[1,2,3,4]}"
+    let c = parseObject "{\"count\":9000,\"items\":[1,2,4,3]}"
+    assertEqual "" a a
+    assertEqual "" b b
+    assertEqual "" c c
+    assertNotEqual a b
+    assertNotEqual a c
+    assertNotEqual b c
+    assertNotEqual b a
+    assertNotEqual c a
+    assertNotEqual c b
+
+case_getObjectWithKey :: IO ()
 case_getObjectWithKey = do
     let o = parseObject "{\"foo\":\"bar\",\"baz\":999,\"quux\":null}"
     let v = getObjectWithKey o "quux"
     assertEqual "" (Just TNull) (fmap typeOf v)
-
-    assertFalse "" (isJust $ getObjectWithKey o "does not exist")
+    assertEqual "" Nothing (getObjectWithKey o "does not exist")
 
 tests :: TestTree
 tests = $(testGroupGenerator)
