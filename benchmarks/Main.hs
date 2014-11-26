@@ -24,33 +24,33 @@ data Gender = Male | Female
 data Fruit = Apple | Strawberry | Banana
     deriving (Eq, Show)
 data Friend = Friend
-    { fId :: Int
-    , fName :: Text
+    { fId :: !Int
+    , fName :: !Text
     } deriving (Eq, Show)
 
 data User = User
-    { uId   :: Text
-    , uIndex    :: Int
-    , uGuid :: Text
-    , uIsActive :: Bool
-    , uBalance  :: Text
-    , uPicture  :: Text
-    , uAge  :: Int
-    , uEyeColor :: EyeColor
-    , uName :: Text
-    , uGender   :: Gender
-    , uCompany  :: Text
-    , uEmail    :: Text
-    , uPhone    :: Text
-    , uAddress  :: Text
-    , uAbout    :: Text
-    , uRegistered   :: Text -- UTCTime?
-    , uLatitude :: Double
-    , uLongitude    :: Double
-    , uTags :: [Text]
-    , uFriends  :: [Friend]
-    , uGreeting :: Text
-    , uFavouriteFruit   :: Fruit
+    { uId   :: !Text
+    , uIndex    :: !Int
+    , uGuid :: !Text
+    , uIsActive :: !Bool
+    , uBalance  :: !Text
+    , uPicture  :: !Text
+    , uAge  :: !Int
+    , uEyeColor :: !EyeColor
+    , uName :: !Text
+    , uGender   :: !Gender
+    , uCompany  :: !Text
+    , uEmail    :: !Text
+    , uPhone    :: !Text
+    , uAddress  :: !Text
+    , uAbout    :: !Text
+    , uRegistered   :: !Text -- UTCTime?
+    , uLatitude :: !Double
+    , uLongitude    :: !Double
+    , uTags :: ![Text]
+    , uFriends  :: ![Friend]
+    , uGreeting :: !Text
+    , uFavouriteFruit   :: !Fruit
     } deriving (Eq, Show)
 
 instance NFData EyeColor
@@ -171,12 +171,12 @@ main = do
     let contentText = force $ decodeUtf8 content
     let lazyContent = force $ BSL.fromChunks [content]
 
-    defaultMain [ bgroup "sajson"
-                    [ bench "parse" $ whnf Sajson.parse contentText
-                    , bench "fromJson" $ whnf (Sajson.fromJson :: Sajson.Value -> Either Sajson.DecodeError [User]) (assumeSuccess $ Sajson.parse contentText)
+    defaultMain [ bgroup "parse"
+                    [ bench "sajson" $ whnf Sajson.parse contentText
+                    , bench "aeson" $ nf (Aeson.decode :: BSL.ByteString -> Maybe Aeson.Value) lazyContent
                     ]
-                , bgroup "aeson"
-                    [ bench "parse" $ nf (Aeson.decode :: BSL.ByteString -> Maybe Aeson.Value) lazyContent
-                    , bench "fromJson" $ whnf (Aeson.decode :: BSL.ByteString -> Maybe [User]) lazyContent
+                , bgroup "extract"
+                    [ bench "sajson" $ whnf (Sajson.fromJson :: Sajson.Value -> Either Sajson.DecodeError [User]) (assumeSuccess $ Sajson.parse contentText)
+                    , bench "aeson" $ whnf (Aeson.decode :: BSL.ByteString -> Maybe [User]) lazyContent
                     ]
                 ]
