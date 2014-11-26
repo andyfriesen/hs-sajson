@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Data.Maybe (isJust)
+import Data.String (IsString)
 import Test.Tasty as Tasty
 import Test.Tasty.HUnit as Tasty (testCase)
 import Test.Tasty.QuickCheck as Tasty (testProperty)
@@ -12,7 +13,9 @@ import Sajson
 import qualified Sajson as Sajson
 
 import Sajson.FromJson (FromJson (..), getKey, withObject)
+import Sajson.ToJson (ToJson (..), (.=), object, newObject, mkPair, add, encodeJsonStrict)
 import Data.Text (Text)
+import Data.Text.Encoding (decodeUtf8)
 
 assumeSuccess (Right r) = r
 assumeSuccess (Left e) = error $ "Unexpected error: " ++ (show e)
@@ -174,6 +177,13 @@ instance FromJson Person where
         pMotorcycles <- getKey o "motorcycles"
         return Person {..}
 
+instance ToJson Person where
+    toJson Person {..} = object $ newObject
+        `add` mkPair "name" pName
+        `add` mkPair "age" pAge
+        `add` mkPair "hobbies" pHobbies
+        `add` mkPair "motorcycles" pMotorcycles
+
 data Motorcycle = Motorcycle
     { mMake :: Text
     , mYear :: Int
@@ -187,26 +197,43 @@ instance FromJson Motorcycle where
         mLoudness <- getKey o "loudness"
         return Motorcycle {..}
 
+instance ToJson Motorcycle where
+    toJson Motorcycle {..} = object $ newObject
+        `add` mkPair "make" mMake
+        `add` mkPair "year" mYear
+        `add` mkPair "loudness" mLoudness
+
+examplePerson = Person
+    { pName = "andy"
+    , pAge = 9000000
+    , pHobbies = ["haskell", "kabuki"]
+    , pMotorcycles =
+        [ Motorcycle
+            { mMake = "kawasaki"
+            , mYear = 1980
+            , mLoudness = 9000000
+            }
+        ]
+    }
+
+examplePersonJson :: IsString a => a
+examplePersonJson = "{\"name\":\"andy\",\"age\":9000000,\"hobbies\":[\"haskell\",\"kabuki\"],\"motorcycles\":[{\"make\":\"kawasaki\",\"year\":1980,\"loudness\":9000000}]}"
+
 case_fromJson = do
-    let Right r = parse "{\"name\":\"andy\",\"age\":9000000,\"hobbies\":[\"haskell\",\"kabuki\"],\"motorcycles\":[{\"make\":\"kawasaki\",\"year\":1980,\"loudness\":9000000}]}"
+    let Right r = parse examplePersonJson
     let o = r
     let p = fromJson o :: Either String Person
-    let expected = Right Person
-            { pName = "andy"
-            , pAge = 9000000
-            , pHobbies = ["haskell", "kabuki"]
-            , pMotorcycles =
-                [ Motorcycle
-                    { mMake = "kawasaki"
-                    , mYear = 1980
-                    , mLoudness = 9000000
-                    }
-                ]
-            }
+    let expected = Right examplePerson
 
     assertEqual "" expected p
 
     return ()
+
+case_toJson = do
+    let t = decodeUtf8 $ encodeJsonStrict examplePerson
+    print t
+    let Right roundtripped = fromJson $ assumeSuccess $ parse t
+    assertEqual "" examplePerson roundtripped
 
 tests :: TestTree
 tests = $(testGroupGenerator)

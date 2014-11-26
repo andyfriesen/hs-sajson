@@ -18,6 +18,7 @@ cabal-version:       >=1.10
 library
     exposed-modules:     Sajson
                        , Sajson.FromJson
+                       , Sajson.ToJson
 
     c-sources:           src/hs-sajson.cpp
     include-dirs:        sajson/include
@@ -57,7 +58,7 @@ benchmark benchmarks
     type:             exitcode-stdio-1.0
     hs-source-dirs:   benchmarks
     main-is:          Main.hs
-    ghc-options:      -O2 -Wall -Werror
+    ghc-options:      -O2 -Wall -ddump-to-file -ddump-simpl
     build-depends: base
                  , hs-sajson
                  , criterion
