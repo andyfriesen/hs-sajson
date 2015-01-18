@@ -178,7 +178,7 @@ instance FromJson Person where
         return Person {..}
 
 instance ToJson Person where
-    toJson Person {..} = object $ newObject
+    toJson Person {..} = toJson $ newObject
         `add` mkPair "name" pName
         `add` mkPair "age" pAge
         `add` mkPair "hobbies" pHobbies
@@ -198,7 +198,7 @@ instance FromJson Motorcycle where
         return Motorcycle {..}
 
 instance ToJson Motorcycle where
-    toJson Motorcycle {..} = object $ newObject
+    toJson Motorcycle {..} = toJson $ newObject
         `add` mkPair "make" mMake
         `add` mkPair "year" mYear
         `add` mkPair "loudness" mLoudness

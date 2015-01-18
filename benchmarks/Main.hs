@@ -139,12 +139,12 @@ instance Sajson.ToJson Fruit where
     toJson = enumToJson "Fruit" fruitTable Sajson.toJson
 
 instance Sajson.ToJson Friend where
-    toJson Friend{..} = {-# SCC "friend_to_json" #-} Sajson.object $ {-# SCC "friend_newobject" #-} Sajson.newObject
+    toJson Friend{..} = {-# SCC "friend_to_json" #-} Sajson.toJson $ {-# SCC "friend_newobject" #-} Sajson.newObject
         `Sajson.add` ({-# SCC "friend_id" #-} Sajson.mkPair "id" fId)
         `Sajson.add` ({-# SCC "friend_name" #-} Sajson.mkPair "name" fName)
 
 instance Sajson.ToJson User where
-    toJson User {..} = {-# SCC "user_to_json" #-} Sajson.object $ Sajson.newObject
+    toJson User {..} = {-# SCC "user_to_json" #-} Sajson.toJson $ Sajson.newObject
         `Sajson.add` Sajson.mkPair "_id" uId
         `Sajson.add` Sajson.mkPair "index" uIndex
         `Sajson.add` Sajson.mkPair "guid" uGuid

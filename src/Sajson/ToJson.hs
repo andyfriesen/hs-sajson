@@ -1,9 +1,12 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns #-}
+{-# LANGUAGE FlexibleInstances, ScopedTypeVariables, FlexibleContexts #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Sajson.ToJson where
 
 import Data.List (foldl')
-import Data.Monoid ((<>), mempty)
+import Data.Monoid ((<>), mempty, mconcat)
+import Data.List (intersperse)
 import Data.Char (ord)
 import Data.Text (Text)
 import Data.Word (Word8)
@@ -14,6 +17,10 @@ import qualified Data.ByteString.Lazy as BSL
 
 import qualified Data.ByteString.Builder as B
 
+import           Data.Vector (Vector)
+
+import           Data.MonoTraversable (MonoFoldable, Element, onull, ofoldl')
+
 data ObjectBuilder = ObjectBuilder
     { obBuilder :: !B.Builder
     , obNeedsComma :: !Bool
@@ -21,7 +28,7 @@ data ObjectBuilder = ObjectBuilder
 
 newtype ValueBuilder = ValueBuilder B.Builder
 
-newtype PairBuilder = PairBuilder B.Builder
+newtype PairBuilder = PairBuilder {unPairBuilder :: B.Builder}
 
 newObject :: ObjectBuilder
 newObject = ObjectBuilder {obBuilder = openCurly, obNeedsComma = False}
@@ -37,8 +44,9 @@ add (ObjectBuilder{..}) (PairBuilder pb) =
         }
 {-# INLINE add #-}
 
-object :: ObjectBuilder -> ValueBuilder
-object ObjectBuilder {obBuilder} = ValueBuilder (obBuilder <> closeCurly)
+object :: [PairBuilder] -> ValueBuilder
+object pairs =
+    ValueBuilder $ openCurly <> (mconcat . intersperse comma . map unPairBuilder) pairs <> closeCurly
 
 newArray :: [ValueBuilder] -> ValueBuilder
 newArray values = case values of
@@ -97,11 +105,48 @@ escapeText t =
     hexEscape :: BP.FixedPrim Word8
     hexEscape = (\c -> ('\\', ('u', fromIntegral c))) BP.>$<
         BP.char8 BP.>*< BP.char8 BP.>*< BP.word16HexFixed
+
+    ascii2 :: (Char, Char) -> BP.BoundedPrim a
+    ascii2 cs = BP.liftFixedToBounded $ (const cs) BP.>$< BP.char7 BP.>*< BP.char7
+    {-# INLINE ascii2 #-}
+
 {-# INLINE escapeText #-}
 
-ascii2 :: (Char, Char) -> BP.BoundedPrim a
-ascii2 cs = BP.liftFixedToBounded $ (const cs) BP.>$< BP.char7 BP.>*< BP.char7
-{-# INLINE ascii2 #-}
+-- escapeText t = B.byteString $ TE.encodeUtf8 t
+
+-- | Unsafely insert a utf8 string into the JSON document.
+-- Do not use this for ByteStrings which are not legal utf8.
+unsafeUtf8ByteString :: BS.ByteString -> ValueBuilder
+-- unsafeUtf8ByteString bs = ValueBuilder $ quoteText $ TE.decodeUtf8 bs
+unsafeUtf8ByteString bs = ValueBuilder $ BP.primMapByteStringBounded escape bs
+  where
+    backslashW8 :: Word8
+    backslashW8 = fromIntegral $ fromEnum '\\'
+
+    quoteW8 :: Word8
+    quoteW8 = fromIntegral $ fromEnum '"'
+
+    escape :: BP.BoundedPrim Word8
+    escape =
+        BP.condB (== backslashW8) (fixed2 (backslashW8, backslashW8)) $
+        BP.condB (== quoteW8)     (fixed2 (backslashW8, quoteW8)) $
+        BP.liftFixedToBounded BP.word8
+
+    {-# INLINE fixed2 #-}
+    fixed2 x = liftFixedToBounded $ const x BP.>$< BP.word8 BP.>*< BP.word8
+
+-- | Unsafely insert a literal value into the JSON document.
+-- Using this makes it possible to formulate strings that are not legal JSON at all, so be careful.
+unsafeBuilder :: B.Builder -> ValueBuilder
+unsafeBuilder = ValueBuilder
+{-# INLINE unsafeBuilder #-}
+
+-- | Unsafely insert a quoted string into the JSON document.
+-- This DOES NOT escape anything.  This function can thus be used to produce illegal JSON strings.
+-- Only use it when you know that the string you're emitting cannot contain anything that needs escaping.
+unsafeQuotedBuilder :: B.Builder -> ValueBuilder
+unsafeQuotedBuilder b = ValueBuilder $
+    B.char7 '"' <> b <> B.char7 '"'
 
 quoteText :: Text -> B.Builder
 quoteText t = quote <> escapeText t <> quote
@@ -138,6 +183,9 @@ closeBracket = B.char7 ']'
 class ToJson a where
     toJson :: a -> ValueBuilder
 
+instance ToJson ValueBuilder where
+    toJson = id
+
 instance ToJson Bool where
     toJson = bool
 
@@ -156,6 +204,43 @@ instance ToJson Text where
 instance ToJson a => ToJson [a] where
     toJson a = newArray $ map toJson a
 
+instance ToJson ObjectBuilder where
+    toJson ObjectBuilder{..} = ValueBuilder obBuilder
+
+arrayToJson :: (ToJson (Element collection), MonoFoldable collection) => collection -> ValueBuilder
+arrayToJson arr
+    | onull arr = newArray []
+    | otherwise =
+        let foldIt (!needComma, !accumulator) !el =
+                let ValueBuilder eb = toJson el
+                    newBuilder = if needComma
+                        then accumulator <> comma <> eb
+                        else accumulator <> eb
+                in (True, newBuilder)
+
+            joined :: B.Builder
+            joined = snd $ ofoldl' foldIt (False, mempty) arr
+
+        in ValueBuilder $ openBracket <> joined <> closeBracket
+
+instance ToJson value => ToJson (Vector value) where
+    toJson = arrayToJson
+--     toJson vec
+--         | 0 == Vector.length vec = newArray []
+--         | otherwise =
+--             let first = vec Vector.! 0
+--                 ValueBuilder firstBuilder = toJson first
+
+--                 foldIt :: B.Builder -> value -> B.Builder
+--                 foldIt accumulator el =
+--                     let ValueBuilder eb = toJson el
+--                     in accumulator <> comma <> eb
+
+--                 joined :: B.Builder
+--                 joined = Vector.foldl' foldIt firstBuilder (Vector.drop 1 vec)
+
+--             in ValueBuilder $ openBracket <> joined <> closeBracket
+
 mkPair :: ToJson a => Text -> a -> PairBuilder
 mkPair k v =
     let ValueBuilder vb = toJson v
@@ -165,6 +250,18 @@ mkPair k v =
 (.=) :: ToJson a => Text -> a -> PairBuilder
 (.=) = mkPair
 {-# INLINE (.=) #-}
+
+(!.=) :: ToJson a => B.Builder -> a -> PairBuilder
+key !.= value =
+    let ValueBuilder vb = toJson value
+        ValueBuilder kb = unsafeQuotedBuilder key
+    in PairBuilder $ kb <> colon <> vb
+{-# INLINE (!.=) #-}
+
+encodeJsonBuilder :: ToJson a => a -> B.Builder
+encodeJsonBuilder v =
+    let ValueBuilder builder = toJson v
+    in builder
 
 encodeJson :: ToJson a => a -> BSL.ByteString
 encodeJson v =
