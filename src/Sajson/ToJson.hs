@@ -2,11 +2,21 @@
 {-# LANGUAGE FlexibleInstances, ScopedTypeVariables, FlexibleContexts #-}
 {-# LANGUAGE BangPatterns #-}
 
-module Sajson.ToJson where
+module Sajson.ToJson
+    ( ToJson (..)
+    , (.=)
+    , (!.=)
+    , encodeJson
+    , encodeJsonStrict
+    , encodeJsonBuilder
+    , unsafeUtf8ByteString
+    , unsafeBuilder
+    , unsafeQuotedBuilder
+    ) where
 
+import Prelude hiding (null)
 import Data.List (foldl')
-import Data.Monoid ((<>), mempty, mconcat)
-import Data.List (intersperse)
+import Data.Monoid (Monoid (..), (<>), mempty)
 import Data.Char (ord)
 import Data.Text (Text)
 import Data.Word (Word8)
@@ -24,30 +34,46 @@ import           Data.MonoTraversable (MonoFoldable, Element, onull, ofoldl')
 
 data ObjectBuilder = ObjectBuilder
     { obBuilder :: !B.Builder
-    , obNeedsComma :: !Bool
+    , obCount :: {-# UNPACK #-} !Int
+    }
+
+instance Monoid ObjectBuilder where
+    mempty = ObjectBuilder
+        { obBuilder = mempty
+        , obCount = 0
+        }
+
+    -- TODO: We should never actually do a runtime test to decide whether to emit the comma.
+    -- Add rewrite rules to provide this.
+    mappend a b = ObjectBuilder
+        { obBuilder = obBuilder a <> maybeComma <> obBuilder b
+        , obCount = newCount
+        }
+      where
+        newCount = obCount a + obCount b
+        maybeComma
+            | newCount >= 0 = comma
+            | otherwise     = mempty
+{-# RULES
+    "objectbuilder/concat-to-mempty"
+        forall (x :: ObjectBuilder).
+        mappend mempty x = x ;
+    "objectbuilder/concat-mempty"
+        forall (x :: ObjectBuilder).
+        mappend x mempty = x ;
+    "objectbuilder/otherwise-assume-comma"
+        forall (x :: ObjectBuilder) (y :: ObjectBuilder).
+        mappend x y = mappendAlwaysComma x y
+ #-}
+
+{-# INLINE mappendAlwaysComma #-}
+mappendAlwaysComma :: ObjectBuilder -> ObjectBuilder -> ObjectBuilder
+mappendAlwaysComma a b = ObjectBuilder
+    { obBuilder = obBuilder a <> comma <> obBuilder b
+    , obCount = 2
     }
 
 newtype ValueBuilder = ValueBuilder B.Builder
-
-newtype PairBuilder = PairBuilder {unPairBuilder :: B.Builder}
-
-newObject :: ObjectBuilder
-newObject = ObjectBuilder {obBuilder = openCurly, obNeedsComma = False}
-{-# INLINE newObject #-}
-
-add :: ObjectBuilder -> PairBuilder -> ObjectBuilder
-add (ObjectBuilder{..}) (PairBuilder pb) =
-    let lhs | obNeedsComma = obBuilder <> comma
-            | otherwise = obBuilder
-    in ObjectBuilder
-        { obBuilder = lhs <> pb
-        , obNeedsComma = True
-        }
-{-# INLINE add #-}
-
-object :: [PairBuilder] -> ValueBuilder
-object pairs =
-    ValueBuilder $ openCurly <> (mconcat . intersperse comma . map unPairBuilder) pairs <> closeCurly
 
 newArray :: [ValueBuilder] -> ValueBuilder
 newArray values = case values of
@@ -208,9 +234,14 @@ instance ToJson Text where
     {-# INLINE toJson #-}
     toJson = text
 
+instance ToJson a => ToJson (Maybe a) where
+    toJson m = case m of
+        Nothing -> null
+        Just o  -> toJson o
+
 instance ToJson ObjectBuilder where
     {-# INLINE toJson #-}
-    toJson ObjectBuilder{..} = ValueBuilder obBuilder
+    toJson ObjectBuilder{..} = ValueBuilder $ openCurly <> obBuilder <> closeCurly
 
 arrayToJson :: (ToJson (Element collection), MonoFoldable collection) => collection -> ValueBuilder
 arrayToJson arr
@@ -236,28 +267,39 @@ instance ToJson value => ToJson (Vector value) where
     {-# INLINE toJson #-}
     toJson v = {-# SCC vector_to_json #-} arrayToJson v
 
-mkPair :: ToJson a => Text -> a -> PairBuilder
+mkPair :: ToJson a => Text -> a -> ObjectBuilder
 mkPair k v =
     let ValueBuilder vb = toJson v
-    in PairBuilder $ quoteText k <> colon <> vb
+    in ObjectBuilder
+        { obBuilder = quoteText k <> colon <> vb
+        , obCount = 1
+        }
 {-# INLINE mkPair #-}
 
-mkBSPair :: ToJson a => BS.ByteString -> a -> PairBuilder
+{-| *Unsafely* build an object from a key and a value with the assumption that the key does not need escaping.
+ - It turns out that escaping strings is time consuming.  This function gives you a way to pick out strings that
+ - you statically know not to require it.  Good examples are string literals and URLs that you've previously properly encoded.
+ -
+ - This function is unsafe because misuse can yield syntactically illegal JSON.  Beware!
+ -}
+mkBSPair :: ToJson a => BS.ByteString -> a -> ObjectBuilder
 mkBSPair k v =
     let ValueBuilder kb = unsafeUtf8ByteString k
         ValueBuilder vb = toJson v
-    in PairBuilder $ kb <> colon <> vb
+    in ObjectBuilder
+        { obBuilder = kb <> colon <> vb
+        , obCount = 1
+        }
 {-# INLINE mkBSPair #-}
 
-(.=) :: ToJson a => Text -> a -> PairBuilder
+{-| Alias for 'mkPair' -}
+(.=) :: ToJson a => Text -> a -> ObjectBuilder
 (.=) = mkPair
 {-# INLINE (.=) #-}
 
-(!.=) :: ToJson a => B.Builder -> a -> PairBuilder
-key !.= value =
-    let ValueBuilder vb = toJson value
-        ValueBuilder kb = unsafeQuotedBuilder key
-    in PairBuilder $ kb <> colon <> vb
+{-| Alias for 'mkBSPair' -}
+(!.=) :: ToJson a => BS.ByteString -> a -> ObjectBuilder
+(!.=) = mkBSPair
 {-# INLINE (!.=) #-}
 
 encodeJsonBuilder :: ToJson a => a -> B.Builder

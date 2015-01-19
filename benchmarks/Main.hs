@@ -4,21 +4,25 @@
 module Main where
 
 import Criterion
+
 import Criterion.Main
+
+import Data.Monoid ((<>), mempty)
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BSL
-import Data.Text.Encoding (decodeUtf8)
+import           Data.Text.Encoding (decodeUtf8)
 
 import qualified Sajson as Sajson
+import           Sajson.FromJson (getKey, withObject)
 import qualified Sajson.FromJson as Sajson
+import           Sajson.ToJson ((!.=))
 import qualified Sajson.ToJson as Sajson
-import Sajson.FromJson (getKey, withObject)
-import Data.Text (Text)
-import Data.String (IsString)
+import           Data.Text (Text)
+import           Data.String (IsString)
 import qualified Data.Aeson as Aeson
-import Data.Aeson ((.:), (.=))
-import Control.DeepSeq (NFData (..), force)
+import           Data.Aeson ((.:), (.=))
+import           Control.DeepSeq (NFData (..), force)
 import qualified Data.ByteString as BS
 
 newtype Utf8 = Utf8 { unUtf8 :: BS.ByteString }
@@ -161,35 +165,35 @@ instance Sajson.ToJson Fruit where
         Strawberry -> "strawberry"
 
 instance Sajson.ToJson str => Sajson.ToJson (Friend str) where
-    toJson Friend{..} = {-# SCC "friend_to_json" #-} Sajson.toJson $ {-# SCC "friend_newobject" #-} Sajson.newObject
-        `Sajson.add` ({-# SCC "friend_id" #-} Sajson.mkBSPair "id" fId)
-        `Sajson.add` ({-# SCC "friend_name" #-} Sajson.mkBSPair "name" ({-# SCC "fName" #-} fName))
+    toJson Friend{..} = {-# SCC "friend_to_json" #-} Sajson.toJson $ mempty
+        <> ({-# SCC "friend_id" #-} "id" !.= fId)
+        <> ({-# SCC "friend_name" #-} "name" !.= ({-# SCC "fName" #-} fName))
     {-# INLINE toJson #-}
 
 instance Sajson.ToJson str => Sajson.ToJson (User str) where
-    toJson User {..} = {-# SCC "user_to_json" #-} Sajson.toJson $ Sajson.newObject
-        `Sajson.add` Sajson.mkBSPair "_id" uId
-        `Sajson.add` Sajson.mkBSPair "index" uIndex
-        `Sajson.add` Sajson.mkBSPair "guid" uGuid
-        `Sajson.add` Sajson.mkBSPair "isActive" uIsActive
-        `Sajson.add` Sajson.mkBSPair "balance" uBalance
-        `Sajson.add` Sajson.mkBSPair "picture" uPicture
-        `Sajson.add` Sajson.mkBSPair "age" uAge
-        `Sajson.add` Sajson.mkBSPair "eyeColor" uEyeColor
-        `Sajson.add` Sajson.mkBSPair "name" uName
-        `Sajson.add` Sajson.mkBSPair "gender" uGender
-        `Sajson.add` Sajson.mkBSPair "company" uCompany
-        `Sajson.add` Sajson.mkBSPair "email" uEmail
-        `Sajson.add` Sajson.mkBSPair "phone" uPhone
-        `Sajson.add` Sajson.mkBSPair "address" uAddress
-        `Sajson.add` Sajson.mkBSPair "about" uAbout
-        `Sajson.add` Sajson.mkBSPair "registered" uRegistered
-        `Sajson.add` Sajson.mkBSPair "latitude" uLatitude
-        `Sajson.add` Sajson.mkBSPair "longitude" uLongitude
-        `Sajson.add` Sajson.mkBSPair "tags" uTags
-        `Sajson.add` Sajson.mkBSPair "friends" uFriends
-        `Sajson.add` Sajson.mkBSPair "greeting" uGreeting
-        `Sajson.add` Sajson.mkBSPair "favoriteFruit" uFavouriteFruit
+    toJson User {..} = {-# SCC "user_to_json" #-} Sajson.toJson $ mempty
+        <> "_id" !.= uId
+        <> "index" !.= uIndex
+        <> "guid" !.= uGuid
+        <> "isActive" !.= uIsActive
+        <> "balance" !.= uBalance
+        <> "picture" !.= uPicture
+        <> "age" !.= uAge
+        <> "eyeColor" !.= uEyeColor
+        <> "name" !.= uName
+        <> "gender" !.= uGender
+        <> "company" !.= uCompany
+        <> "email" !.= uEmail
+        <> "phone" !.= uPhone
+        <> "address" !.= uAddress
+        <> "about" !.= uAbout
+        <> "registered" !.= uRegistered
+        <> "latitude" !.= uLatitude
+        <> "longitude" !.= uLongitude
+        <> "tags" !.= uTags
+        <> "friends" !.= uFriends
+        <> "greeting" !.= uGreeting
+        <> "favoriteFruit" !.= uFavouriteFruit
     {-# INLINE toJson #-}
 
 instance Aeson.FromJSON EyeColor where
