@@ -56,7 +56,9 @@ benchmark benchmark
     hs-source-dirs:   benchmarks
     main-is:          Main.hs
     ghc-options:      -O2 -Wall
-    -- ghc-options:      -ddump-to-file -ddump-simpl
+    ghc-options:      -fsimpl-tick-factor=200
+    ghc-options:      -ddump-to-file -ddump-simpl
+    ghc-prof-options: -fprof-auto
     build-depends: base
                  , hs-sajson
                  , criterion

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Main where
 
@@ -14,10 +15,23 @@ import qualified Sajson.FromJson as Sajson
 import qualified Sajson.ToJson as Sajson
 import Sajson.FromJson (getKey, withObject)
 import Data.Text (Text)
-import Data.Tuple (swap)
+import Data.String (IsString)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.:), (.=))
 import Control.DeepSeq (NFData (..), force)
+import qualified Data.ByteString as BS
+
+newtype Utf8 = Utf8 { unUtf8 :: BS.ByteString }
+    deriving (Show, Eq, IsString)
+
+instance Sajson.ToJson Utf8 where
+    toJson (Utf8 bs) = Sajson.unsafeUtf8ByteString bs
+
+instance Sajson.FromJson Utf8 where
+    fromJson val =
+        case Sajson.asByteString val of
+            Just v -> Right $Utf8 v
+            Nothing -> Left "boop"
 
 data EyeColor = Green | Blue | Brown
     deriving (Eq, Show)
@@ -25,33 +39,33 @@ data Gender = Male | Female
     deriving (Eq, Show)
 data Fruit = Apple | Strawberry | Banana
     deriving (Eq, Show)
-data Friend = Friend
+data Friend string = Friend
     { fId :: !Int
-    , fName :: !Text
+    , fName :: !string
     } deriving (Eq, Show)
 
-data User = User
-    { uId   :: !Text
+data User string = User
+    { uId   :: !string
     , uIndex    :: !Int
-    , uGuid :: !Text
+    , uGuid :: !string
     , uIsActive :: !Bool
-    , uBalance  :: !Text
-    , uPicture  :: !Text
+    , uBalance  :: !string
+    , uPicture  :: !string
     , uAge  :: !Int
     , uEyeColor :: !EyeColor
-    , uName :: !Text
+    , uName :: !string
     , uGender   :: !Gender
-    , uCompany  :: !Text
-    , uEmail    :: !Text
-    , uPhone    :: !Text
-    , uAddress  :: !Text
-    , uAbout    :: !Text
-    , uRegistered   :: !Text -- UTCTime?
+    , uCompany  :: !string
+    , uEmail    :: !string
+    , uPhone    :: !string
+    , uAddress  :: !string
+    , uAbout    :: !string
+    , uRegistered   :: !string -- UTCTime?
     , uLatitude :: !Double
     , uLongitude    :: !Double
     , uTags :: ![Text]
-    , uFriends  :: ![Friend]
-    , uGreeting :: !Text
+    , uFriends  :: ![Friend string]
+    , uGreeting :: !string
     , uFavouriteFruit   :: !Fruit
     } deriving (Eq, Show)
 
@@ -59,10 +73,10 @@ instance NFData EyeColor
 instance NFData Gender
 instance NFData Fruit
 
-instance NFData Friend where
+instance NFData str => NFData (Friend str) where
     rnf Friend {..} = (rnf fId) `seq` (rnf fName) `seq` ()
 
-instance NFData User where
+instance NFData a => NFData (User a) where
     rnf User {..} = (rnf uId) `seq` (rnf uIndex) `seq` (rnf uGuid) `seq` (rnf uIsActive) `seq` (rnf uBalance) `seq` (rnf uPicture) `seq` (rnf uAge) `seq` (rnf uEyeColor) `seq` (rnf uName) `seq` (rnf uGender) `seq` (rnf uCompany) `seq` (rnf uEmail) `seq` (rnf uPhone) `seq` (rnf uAddress) `seq` (rnf uAbout) `seq` (rnf uRegistered) `seq` (rnf uLatitude) `seq` (rnf uLongitude) `seq` (rnf uTags) `seq` (rnf uFriends) `seq` (rnf uGreeting) `seq` (rnf uFavouriteFruit) `seq` ()
 
 eyeColorTable :: [(Text, EyeColor)]
@@ -81,13 +95,6 @@ enumFromJson enumName table extract v = do
         Just r -> return r
         Nothing -> fail $ "Bad " ++ enumName ++ ": " ++ show s
 
-enumToJson :: (Show a, Eq a)
-           => String -> [(b, a)] -> (b -> t) -> a -> t
-enumToJson enumName table encode v = do
-    case lookup v (map swap table) of
-        Just n -> encode n
-        Nothing -> error $ "Failed to encode " ++ enumName ++ ": " ++ show v
-
 instance Sajson.FromJson EyeColor where
     fromJson = enumFromJson "EyeColor" eyeColorTable Sajson.fromJson
 
@@ -95,15 +102,22 @@ instance Sajson.FromJson Gender where
     fromJson = enumFromJson "Gender" genderTable Sajson.fromJson
 
 instance Sajson.FromJson Fruit where
-    fromJson = enumFromJson "Fruit" fruitTable Sajson.fromJson
+    fromJson v =
+        let asStr = Sajson.asByteString v
+        in case asStr of
+            Just s | "apple"      == s -> Right Apple
+                   | "strawberry" == s -> Right Strawberry
+                   | "banana"     == s -> Right Banana
+                   | otherwise         -> Left "Got bad string decoding Fruit"
+            Nothing -> Left "Got nonstring decoding Fruit"
 
-instance Sajson.FromJson Friend where
+instance Sajson.FromJson str => Sajson.FromJson (Friend str) where
     fromJson v = withObject v $ \o -> do
         fId <- getKey o "id"
         fName <- getKey o "name"
         return Friend {..}
 
-instance Sajson.FromJson User where
+instance Sajson.FromJson str => Sajson.FromJson (User str) where
     fromJson v = withObject v $ \o -> do
         uId <- getKey o "_id"
         uIndex <- getKey o "index"
@@ -130,43 +144,53 @@ instance Sajson.FromJson User where
         return User {..}
 
 instance Sajson.ToJson EyeColor where
-    toJson = enumToJson "EyeColor" eyeColorTable Sajson.toJson
+    toJson ec = Sajson.toJson $ case ec of
+        Green -> "green" :: Utf8
+        Blue -> "blue"
+        Brown -> "brown"
 
 instance Sajson.ToJson Gender where
-    toJson = enumToJson "Gender" genderTable Sajson.toJson
+    toJson g = Sajson.toJson $ case g of
+        Male -> "male" :: Utf8
+        Female -> "female"
 
 instance Sajson.ToJson Fruit where
-    toJson = enumToJson "Fruit" fruitTable Sajson.toJson
+    toJson f = Sajson.toJson $ case f of
+        Apple      -> "apple" :: Utf8
+        Banana     -> "banana"
+        Strawberry -> "strawberry"
 
-instance Sajson.ToJson Friend where
+instance Sajson.ToJson str => Sajson.ToJson (Friend str) where
     toJson Friend{..} = {-# SCC "friend_to_json" #-} Sajson.toJson $ {-# SCC "friend_newobject" #-} Sajson.newObject
-        `Sajson.add` ({-# SCC "friend_id" #-} Sajson.mkPair "id" fId)
-        `Sajson.add` ({-# SCC "friend_name" #-} Sajson.mkPair "name" fName)
+        `Sajson.add` ({-# SCC "friend_id" #-} Sajson.mkBSPair "id" fId)
+        `Sajson.add` ({-# SCC "friend_name" #-} Sajson.mkBSPair "name" ({-# SCC "fName" #-} fName))
+    {-# INLINE toJson #-}
 
-instance Sajson.ToJson User where
+instance Sajson.ToJson str => Sajson.ToJson (User str) where
     toJson User {..} = {-# SCC "user_to_json" #-} Sajson.toJson $ Sajson.newObject
-        `Sajson.add` Sajson.mkPair "_id" uId
-        `Sajson.add` Sajson.mkPair "index" uIndex
-        `Sajson.add` Sajson.mkPair "guid" uGuid
-        `Sajson.add` Sajson.mkPair "isActive" uIsActive
-        `Sajson.add` Sajson.mkPair "balance" uBalance
-        `Sajson.add` Sajson.mkPair "picture" uPicture
-        `Sajson.add` Sajson.mkPair "age" uAge
-        `Sajson.add` Sajson.mkPair "eyeColor" uEyeColor
-        `Sajson.add` Sajson.mkPair "name" uName
-        `Sajson.add` Sajson.mkPair "gender" uGender
-        `Sajson.add` Sajson.mkPair "company" uCompany
-        `Sajson.add` Sajson.mkPair "email" uEmail
-        `Sajson.add` Sajson.mkPair "phone" uPhone
-        `Sajson.add` Sajson.mkPair "address" uAddress
-        `Sajson.add` Sajson.mkPair "about" uAbout
-        `Sajson.add` Sajson.mkPair "registered" uRegistered
-        `Sajson.add` Sajson.mkPair "latitude" uLatitude
-        `Sajson.add` Sajson.mkPair "longitude" uLongitude
-        `Sajson.add` Sajson.mkPair "tags" uTags
-        `Sajson.add` Sajson.mkPair "friends" uFriends
-        `Sajson.add` Sajson.mkPair "greeting" uGreeting
-        `Sajson.add` Sajson.mkPair "favoriteFruit" uFavouriteFruit
+        `Sajson.add` Sajson.mkBSPair "_id" uId
+        `Sajson.add` Sajson.mkBSPair "index" uIndex
+        `Sajson.add` Sajson.mkBSPair "guid" uGuid
+        `Sajson.add` Sajson.mkBSPair "isActive" uIsActive
+        `Sajson.add` Sajson.mkBSPair "balance" uBalance
+        `Sajson.add` Sajson.mkBSPair "picture" uPicture
+        `Sajson.add` Sajson.mkBSPair "age" uAge
+        `Sajson.add` Sajson.mkBSPair "eyeColor" uEyeColor
+        `Sajson.add` Sajson.mkBSPair "name" uName
+        `Sajson.add` Sajson.mkBSPair "gender" uGender
+        `Sajson.add` Sajson.mkBSPair "company" uCompany
+        `Sajson.add` Sajson.mkBSPair "email" uEmail
+        `Sajson.add` Sajson.mkBSPair "phone" uPhone
+        `Sajson.add` Sajson.mkBSPair "address" uAddress
+        `Sajson.add` Sajson.mkBSPair "about" uAbout
+        `Sajson.add` Sajson.mkBSPair "registered" uRegistered
+        `Sajson.add` Sajson.mkBSPair "latitude" uLatitude
+        `Sajson.add` Sajson.mkBSPair "longitude" uLongitude
+        `Sajson.add` Sajson.mkBSPair "tags" uTags
+        `Sajson.add` Sajson.mkBSPair "friends" uFriends
+        `Sajson.add` Sajson.mkBSPair "greeting" uGreeting
+        `Sajson.add` Sajson.mkBSPair "favoriteFruit" uFavouriteFruit
+    {-# INLINE toJson #-}
 
 instance Aeson.FromJSON EyeColor where
     parseJSON = enumFromJson "EyeColor" eyeColorTable Aeson.parseJSON
@@ -177,13 +201,13 @@ instance Aeson.FromJSON Gender where
 instance Aeson.FromJSON Fruit where
     parseJSON = enumFromJson "Fruit" fruitTable Aeson.parseJSON
 
-instance Aeson.FromJSON Friend where
+instance Aeson.FromJSON str => Aeson.FromJSON (Friend str) where
     parseJSON = Aeson.withObject "Friend" $ \o -> do
         fId <- o .: "id"
         fName <- o .: "name"
         return Friend {..}
 
-instance Aeson.FromJSON User where
+instance Aeson.FromJSON str => Aeson.FromJSON (User str) where
     parseJSON = Aeson.withObject "User" $ \o -> do
         uId <- o .: "_id"
         uIndex <- o .: "index"
@@ -210,21 +234,29 @@ instance Aeson.FromJSON User where
         return User {..}
 
 instance Aeson.ToJSON EyeColor where
-    toJSON = enumToJson "EyeColor" eyeColorTable Aeson.toJSON
+    toJSON ec = Aeson.toJSON $ case ec of
+        Green -> "green" :: Text
+        Blue -> "blue"
+        Brown -> "brown"
 
 instance Aeson.ToJSON Gender where
-    toJSON = enumToJson "Gender" genderTable Aeson.toJSON
+    toJSON g = Aeson.toJSON $ case g of
+        Male -> "male" :: Text
+        Female -> "female"
 
 instance Aeson.ToJSON Fruit where
-    toJSON = enumToJson "Fruit" fruitTable Aeson.toJSON
+    toJSON f = Aeson.toJSON $ case f of
+        Apple -> "apple" :: Text
+        Banana -> "banana"
+        Strawberry -> "strawberry"
 
-instance Aeson.ToJSON Friend where
+instance Aeson.ToJSON str => Aeson.ToJSON (Friend str) where
     toJSON Friend {..} = Aeson.object
         [ "id" .= fId
         , "name" .= fName
         ]
 
-instance Aeson.ToJSON User where
+instance Aeson.ToJSON str => Aeson.ToJSON (User str) where
     toJSON User{..} = Aeson.object
         [ "_id" .= uId
         , "index" .= uIndex
@@ -260,18 +292,23 @@ main = do
     let contentText = force $ decodeUtf8 content
     let lazyContent = force $ BSL.fromChunks [content]
 
-    let Right parsedUserList = (Sajson.fromJson :: Sajson.Value -> Either Sajson.DecodeError [User]) (assumeSuccess $ Sajson.parse contentText)
+    let parsedUserList :: [User Text]
+        Right parsedUserList = Sajson.fromJson (assumeSuccess $ Sajson.parse contentText)
+
+        parsedUserList' :: [User Utf8]
+        Right parsedUserList' = Sajson.fromJson (assumeSuccess $ Sajson.parse contentText)
 
     defaultMain [ bgroup "parse"
                     [ bench "sajson" $ whnf Sajson.parse contentText
                     , bench "aeson" $ nf (Aeson.decode :: BSL.ByteString -> Maybe Aeson.Value) lazyContent
                     ]
                 , bgroup "extract"
-                    [ bench "sajson" $ whnf (Sajson.fromJson :: Sajson.Value -> Either Sajson.DecodeError [User]) (assumeSuccess $ Sajson.parse contentText)
-                    , bench "aeson" $ whnf (Aeson.decode :: BSL.ByteString -> Maybe [User]) lazyContent
+                    [ bench "sajson" $ whnf (Sajson.fromJson :: Sajson.Value -> Either Sajson.DecodeError [User Text]) (assumeSuccess $ Sajson.parse contentText)
+                    , bench "aeson" $ whnf (Aeson.decode :: BSL.ByteString -> Maybe [User Text]) lazyContent
                     ]
                 , bgroup "render"
                     [ bench "sajson" $ nf Sajson.encodeJsonStrict parsedUserList
+                    , bench "sajson2" $ nf Sajson.encodeJsonStrict parsedUserList'
                     , bench "aeson" $ nf Aeson.encode parsedUserList
                     ]
                 ]

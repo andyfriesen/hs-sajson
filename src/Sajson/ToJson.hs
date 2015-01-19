@@ -16,6 +16,7 @@ import           Data.ByteString.Builder.Prim as BP
 import qualified Data.ByteString.Lazy as BSL
 
 import qualified Data.ByteString.Builder as B
+import qualified Data.ByteString.Builder.Internal as B
 
 import           Data.Vector (Vector)
 
@@ -118,7 +119,7 @@ escapeText t =
 -- Do not use this for ByteStrings which are not legal utf8.
 unsafeUtf8ByteString :: BS.ByteString -> ValueBuilder
 -- unsafeUtf8ByteString bs = ValueBuilder $ quoteText $ TE.decodeUtf8 bs
-unsafeUtf8ByteString bs = ValueBuilder $ BP.primMapByteStringBounded escape bs
+unsafeUtf8ByteString bs = ValueBuilder $ quote <> BP.primMapByteStringBounded escape bs <> quote
   where
     backslashW8 :: Word8
     backslashW8 = fromIntegral $ fromEnum '\\'
@@ -184,27 +185,31 @@ class ToJson a where
     toJson :: a -> ValueBuilder
 
 instance ToJson ValueBuilder where
+    {-# INLINE toJson #-}
     toJson = id
 
 instance ToJson Bool where
+    {-# INLINE toJson #-}
     toJson = bool
 
 instance ToJson Int where
+    {-# INLINE toJson #-}
     toJson = int
 
 instance ToJson Float where
+    {-# INLINE toJson #-}
     toJson = float
 
 instance ToJson Double where
+    {-# INLINE toJson #-}
     toJson = double
 
 instance ToJson Text where
+    {-# INLINE toJson #-}
     toJson = text
 
-instance ToJson a => ToJson [a] where
-    toJson a = newArray $ map toJson a
-
 instance ToJson ObjectBuilder where
+    {-# INLINE toJson #-}
     toJson ObjectBuilder{..} = ValueBuilder obBuilder
 
 arrayToJson :: (ToJson (Element collection), MonoFoldable collection) => collection -> ValueBuilder
@@ -223,29 +228,26 @@ arrayToJson arr
 
         in ValueBuilder $ openBracket <> joined <> closeBracket
 
+instance ToJson value => ToJson [value] where
+    {-# INLINE toJson #-}
+    toJson l = {-# SCC list_to_json #-} arrayToJson l
+
 instance ToJson value => ToJson (Vector value) where
-    toJson = arrayToJson
---     toJson vec
---         | 0 == Vector.length vec = newArray []
---         | otherwise =
---             let first = vec Vector.! 0
---                 ValueBuilder firstBuilder = toJson first
-
---                 foldIt :: B.Builder -> value -> B.Builder
---                 foldIt accumulator el =
---                     let ValueBuilder eb = toJson el
---                     in accumulator <> comma <> eb
-
---                 joined :: B.Builder
---                 joined = Vector.foldl' foldIt firstBuilder (Vector.drop 1 vec)
-
---             in ValueBuilder $ openBracket <> joined <> closeBracket
+    {-# INLINE toJson #-}
+    toJson v = {-# SCC vector_to_json #-} arrayToJson v
 
 mkPair :: ToJson a => Text -> a -> PairBuilder
 mkPair k v =
     let ValueBuilder vb = toJson v
     in PairBuilder $ quoteText k <> colon <> vb
 {-# INLINE mkPair #-}
+
+mkBSPair :: ToJson a => BS.ByteString -> a -> PairBuilder
+mkBSPair k v =
+    let ValueBuilder kb = unsafeUtf8ByteString k
+        ValueBuilder vb = toJson v
+    in PairBuilder $ kb <> colon <> vb
+{-# INLINE mkBSPair #-}
 
 (.=) :: ToJson a => Text -> a -> PairBuilder
 (.=) = mkPair
@@ -266,7 +268,10 @@ encodeJsonBuilder v =
 encodeJson :: ToJson a => a -> BSL.ByteString
 encodeJson v =
     let ValueBuilder builder = toJson v
-    in B.toLazyByteString builder
+        allocationStrategy = B.untrimmedStrategy (100 * kb) (100 * kb)
+        kb = 1024
+
+    in B.toLazyByteStringWith allocationStrategy mempty builder
 
 encodeJsonStrict :: ToJson a => a -> BS.ByteString
 encodeJsonStrict = BSL.toStrict . encodeJson

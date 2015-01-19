@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 
 module Sajson
     ( Value
@@ -13,6 +14,7 @@ module Sajson
     , asDouble
     , asNumber
     , asString
+    , asByteString
     , getArrayElement
     , Sajson.length
     , numKeys
@@ -34,7 +36,10 @@ import Data.Text (Text)
 import Data.Text.Foreign
 import Data.Word
 import Data.Text.Encoding
-import Data.ByteString.Unsafe
+
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Internal as BS
+import qualified Data.ByteString.Unsafe as BS
 
 data CppParser
 data CppDocument
@@ -44,6 +49,9 @@ data CppValue
 -- The lifetime of documents and values is dependent on the lifetime of the parser, so
 -- all Values retain the ForeignPtr.
 data Value    = Value !(ForeignPtr CppParser) !(ForeignPtr CppValue)
+
+vParser :: Value -> ForeignPtr CppParser
+vParser (Value p _) = p
 
 newtype Array = Array Value
     deriving (Eq, Show)
@@ -125,7 +133,7 @@ parse t = unsafePerformIO $ do
                     lineNo <- sj_document_get_error_line dp
                     colNo  <- sj_document_get_error_column dp
                     errPtr <- sj_document_get_error_message dp
-                    errMsg <- unsafePackCString errPtr
+                    errMsg <- BS.unsafePackCString errPtr
                     return $ Left $ ParseError lineNo colNo (force $ decodeUtf8 errMsg)
 
 mkValue :: ForeignPtr CppParser -> Ptr CppValue -> IO Value
@@ -187,13 +195,32 @@ unsafeAsString val = unsafePerformIO $ do
             withValPtr val $ \vp -> sj_value_get_string_value vp cpp lp
             cp <- peek cpp
             l <- peek lp
-            bs <- unsafePackCStringLen (cp, fromIntegral l)
+            bs <- BS.unsafePackCStringLen (cp, fromIntegral l)
             return $ force $ decodeUtf8 bs
+
+unsafeAsByteString :: Value -> ByteString
+unsafeAsByteString val = unsafePerformIO $ do
+    let parserPtr = vParser val
+    alloca $ \cpp -> do
+        alloca $ \lp -> do
+            withValPtr val $ \vp -> sj_value_get_string_value vp cpp lp
+            cp <- peek cpp
+            l <- peek lp
+            offset <- withForeignPtr parserPtr $ \vp ->
+                return $ cp `minusPtr` (castPtr vp)
+
+            return $ BS.fromForeignPtr (castForeignPtr parserPtr) offset (fromIntegral l)
 
 asString :: Value -> Maybe Text
 asString val =
     case typeOf val of
         TString -> Just $ unsafeAsString val
+        _       -> Nothing
+
+asByteString :: Value -> Maybe ByteString
+asByteString val =
+    case typeOf val of
+        TString -> Just $ unsafeAsByteString val
         _       -> Nothing
 
 getArrayElement :: Array -> Word -> Value
@@ -217,7 +244,7 @@ mkText :: Ptr (Ptr CChar) -> Ptr Word -> IO Text
 mkText ccp lp = do
     cp <- peek ccp
     l <- peek lp
-    bs <- unsafePackCStringLen (cp, fromIntegral l)
+    bs <- BS.unsafePackCStringLen (cp, fromIntegral l)
     return $ force $ decodeUtf8 bs
 
 getObjectKey :: Object -> Word -> Text
