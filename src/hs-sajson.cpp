@@ -106,7 +106,7 @@ value* sj_value_get_object_with_key(value* v, const char* key, size_t keyLength)
     if (index < v->get_length()) {
         return new value(v->get_object_value(index));
     } else {
-        return nullptr;
+        return 0;
     }
 }
 
